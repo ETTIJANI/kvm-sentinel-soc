@@ -1,0 +1,10 @@
+# Keep the honeypot build context tiny; the logs directory is a bind mount and
+# must never be copied into an image.
+logs/
+**/__pycache__
+**/*.pyc
+.git
+.gitignore
+*.qcow2
+*.iso
+.dockerignore

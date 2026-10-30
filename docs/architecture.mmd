@@ -1,0 +1,69 @@
+%% KVM-Sentinel-SOC — architecture
+%% Render with: npx @mermaid-js/mermaid-cli -i docs/architecture.mmd -o docs/architecture.svg
+%% or paste into any Mermaid live editor.
+
+flowchart LR
+    classDef isolated fill:#1f2937,stroke:#ef4444,stroke-width:2px,color:#f9fafb
+    classDef nat fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#eff6ff
+    classDef hostctl fill:#3b0764,stroke:#c084fc,stroke-width:2px,color:#faf5ff
+    classDef human fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#ecfdf5
+    classDef trap fill:#7f1d1d,stroke:#fca5a5,stroke-width:2px,color:#fef2f2
+    classDef brain fill:#0c4a6e,stroke:#38bdf8,stroke-width:2px,color:#f0f9ff
+
+    subgraph LAN["Classroom LAN (untrusted)"]
+        STUDENTS["Students<br/>hydra / ssh / nmap"]
+    end
+
+    subgraph HOST["Physical host — KVM/QEMU + libvirtd"]
+        direction TB
+        FW["iptables DNAT<br/>LAN:2222 → 10.10.0.10:2222<br/>+ MASQUERADE"]
+        CTL["approval_daemon.py<br/>192.168.122.1:5000<br/>validate → render → yes/no"]
+        VIRSH["virsh (whitelisted)<br/>snapshot-create-as<br/>domif-setlink down/up"]
+        VIRBR0["virbr0 — default (NAT)<br/>192.168.122.0/24"]
+        VIRBR1["virbr1 — backend-isolated<br/>10.10.0.0/24 · no forward"]
+    end
+
+    subgraph VM1["vm-honeypot — 10.10.0.10 (1 vCPU / 1 GiB)"]
+        direction TB
+        SSHD["ssh-honeypot container<br/>sshd :2222 → auth.log"]
+        SIM["simulator container<br/>Paramiko brute force"]
+        PT["promtail<br/>tails auth.log"]
+    end
+
+    subgraph VM2["vm-soc — 192.168.122.20 + 10.10.0.20 (4 vCPU / 5 GiB)"]
+        direction TB
+        LOKI["Loki :3100<br/>7-day retention"]
+        GRAF["Grafana :3000<br/>SSH Sentinel SOC dashboard"]
+        OLLAMA["Ollama :11434<br/>qwen2.5:0.5b"]
+        AGENTS["agents container<br/>parseur → détecteur → analyste → rapporteur"]
+    end
+
+    REPORTS[("vm2-soc/reports/*.md and *.json")]
+    AUDIT[("host/controller/state<br/>incidents.jsonl")]
+    HUMAN["Human operator<br/>(y/N)"]
+
+    STUDENTS -- "ssh root@HOST -p 2222" --> FW
+    FW -- "DNAT + SNAT 10.10.0.1" --> SSHD
+    SIM -- "40 attempts / round" --> SSHD
+    SSHD -- "rsyslog → ./logs/auth.log" --> PT
+    PT -- "POST /loki/api/v1/push :3100" --> LOKI
+    LOKI --> GRAF
+    AGENTS -- "query_range (cursor)" --> LOKI
+    AGENTS -- "POST /api/generate" --> OLLAMA
+    AGENTS -- "report" --> REPORTS
+    AGENTS -- "POST /alert (JSON)" --> CTL
+    CTL -- "render + prompt" --> HUMAN
+    HUMAN -- "y" --> VIRSH
+    VIRSH -- "snapshot + link down" --> VM1
+    CTL -- "audit trail" --> AUDIT
+
+    VIRBR0 -.- VM2
+    VIRBR1 -.- VM1
+    VIRBR1 -.- VM2
+    FW -.- VIRBR1
+
+    class STUDENTS,HUMAN human
+    class FW,VIRBR1 isolated
+    class CTL,VIRSH,VIRBR0 hostctl
+    class SSHD,SIM trap
+    class PT,LOKI,GRAF,OLLAMA,AGENTS brain

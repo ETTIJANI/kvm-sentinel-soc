@@ -1,0 +1,97 @@
+#cloud-config
+# ---------------------------------------------------------------------------
+# vm-soc — Ubuntu Server 24.04 (cloud image)
+#
+# Rendered by host/provisioning/deploy-lab.sh, which replaces:
+#   __SSH_AUTHORIZED_KEYS__ -> ["ssh-ed25519 AAAA..."]   (or removes the line)
+#   __PAYLOAD_FILES__       -> write_files entries for the vm2-soc/ tree
+#
+# Resulting guest layout: /opt/soc/{docker-compose.yml,loki/,grafana/,
+# agents/,reports/,state/}. Steady state: dual-homed, 5 GiB / 4 vCPU.
+# ---------------------------------------------------------------------------
+hostname: vm-soc
+fqdn: vm-soc.sentinel.lab
+manage_etc_hosts: true
+timezone: UTC
+package_update: true
+package_upgrade: false
+ssh_pwauth: true
+disable_root: false
+
+users:
+  - name: soc
+    gecos: KVM-Sentinel-SOC lab operator
+    groups: [adm, sudo, docker]
+    shell: /bin/bash
+    lock_passwd: false
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys: __SSH_AUTHORIZED_KEYS__
+
+chpasswd:
+  expire: false
+  list: |
+    soc:sentinel
+
+packages:
+  - qemu-guest-agent
+  - chrony
+  - curl
+  - ca-certificates
+  - jq
+  - htop
+  - vim
+  - net-tools
+  - dnsutils
+  - tcpdump
+
+write_files:
+  - path: /etc/motd
+    permissions: '0644'
+    content: |
+      ===================================================================
+       vm-soc  (KVM-Sentinel-SOC brain)
+      ===================================================================
+       network : 192.168.122.20/24 (NAT) + 10.10.0.20/24 (isolated)
+       stack   : docker compose in /opt/soc
+
+       Grafana  : http://192.168.122.20:3000   admin / sentinel
+       Loki     : http://10.10.0.20:3100       (promtail push endpoint)
+       Ollama   : http://127.0.0.1:11434       model qwen2.5:0.5b
+
+       follow the AI pipeline:
+         cd /opt/soc && docker compose logs -f agents
+
+       incident reports:
+         ls -lt /opt/soc/reports
+      ===================================================================
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" },
+        "live-restore": true
+      }
+  __PAYLOAD_FILES__
+
+runcmd:
+  - install -d -m 0775 -o 10002 -g 10002 /opt/soc/reports
+  - install -d -m 0775 /opt/soc/state
+  - curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+  - sh /tmp/get-docker.sh
+  - systemctl enable --now docker
+  - usermod -aG docker soc
+  - bash -c 'docker compose version >/dev/null 2>&1 || (apt-get update && apt-get install -y docker-compose-plugin)'
+  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now chrony
+  - chown -R soc:soc /opt/soc
+  - chown -R 10002:10002 /opt/soc/reports
+  - bash -c 'cd /opt/soc && docker compose up -d --build'
+  # Wait for the observability stack, but never fail the boot on a slow pull:
+  # deploy-lab.sh also polls 192.168.122.20:3000 and 11434 from the host.
+  - bash -c 'for i in $(seq 1 120); do curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1 && exit 0; sleep 5; done; echo "grafana still starting after 600s" >&2; exit 0'
+  - bash -c 'for i in $(seq 1 120); do curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && exit 0; sleep 5; done; echo "ollama still starting after 600s" >&2; exit 0'
+  - install -d -m 0755 /var/lib/kvm-sentinel
+  - bash -c 'date -u +%FT%TZ > /var/lib/kvm-sentinel/ready'
+
+final_message: "vm-soc ready after $UPTIME seconds (Grafana :3000, Loki :3100, Ollama :11434, agents running)"

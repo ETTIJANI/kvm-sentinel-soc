@@ -1,0 +1,170 @@
+name: soc
+
+# vm-soc stack — the brain of the lab.
+#
+#   loki        : log store. Promtail on vm-honeypot pushes to 10.10.0.20:3100.
+#   grafana     : dashboards, provisioned from ./grafana/provisioning.
+#   ollama      : local CPU inference (qwen2.5:0.5b, ~400 MB resident).
+#   ollama-init : one-shot model pull, so a fresh VM needs no manual step.
+#   agents      : the 4-agent pipeline (parse -> detect -> analyse -> report).
+#
+# Memory budget of this VM: 5 GiB.
+#   loki ~250 MB, grafana ~150 MB, ollama+0.5b model ~900 MB, agents ~120 MB,
+#   the rest is page cache and Docker overhead.
+#
+# The agents reach the host controller at the literal 192.168.122.1 (the virbr0
+# bridge). host.docker.internal is mapped too, for operators who prefer it.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: loki
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/loki/loki-config.yml"
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    networks:
+      - soc-net
+    healthcheck:
+      # /ready answers 503 until the ingester has replayed its WAL.
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: grafana
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: sentinel
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/ssh-soc-dashboard.json
+      GF_SERVER_SERVE_FROM_SUB_PATH: "false"
+      GF_LOG_MODE: console
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - soc-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+
+  ollama:
+    image: ollama/ollama:0.5.4
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      # CPU-only inference on 4 vCPUs: one model, one request at a time, kept
+      # warm for 30 minutes so a demo does not pay the cold-start cost twice.
+      OLLAMA_HOST: 0.0.0.0
+      OLLAMA_KEEP_ALIVE: 30m
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - soc-net
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    logging: *default-logging
+
+  ollama-init:
+    image: ollama/ollama:0.5.4
+    container_name: ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL:-qwen2.5:0.5b} && echo model-ready"
+    restart: "no"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - soc-net
+    logging: *default-logging
+
+  agents:
+    build:
+      context: ./agents
+    image: kvm-sentinel/agents:1.0.0
+    container_name: soc-agents
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      grafana:
+        condition: service_started
+    environment:
+      LOKI_URL: http://loki:3100
+      LOKI_QUERY: '{job="ssh-honeypot"}'
+      POLL_INTERVAL_SECONDS: "2"
+      INITIAL_LOOKBACK_MINUTES: "30"
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:0.5b}
+      OLLAMA_TIMEOUT_SECONDS: "25"
+      BRUTEFORCE_THRESHOLD: "5"
+      BRUTEFORCE_WINDOW_SECONDS: "30"
+      ALERT_COOLDOWN_SECONDS: "120"
+      WEBHOOK_URL: http://192.168.122.1:5000/alert
+      WEBHOOK_TIMEOUT_SECONDS: "10"
+      REPORTS_DIR: /reports
+      STATE_DIR: /app/state
+      SENTINEL_TOKEN: ${SENTINEL_TOKEN:-}
+      LOG_LEVEL: INFO
+    volumes:
+      - ./reports:/reports
+      - agents-state:/app/state
+    networks:
+      - soc-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+networks:
+  soc-net:
+    driver: bridge
+
+volumes:
+  loki-data:
+  grafana-data:
+  ollama-data:
+  agents-state:

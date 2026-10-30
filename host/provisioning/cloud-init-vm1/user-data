@@ -1,0 +1,116 @@
+#cloud-config
+# ---------------------------------------------------------------------------
+# vm-honeypot — Ubuntu Server 24.04 (cloud image)
+#
+# Rendered by host/provisioning/deploy-lab.sh, which replaces:
+#   __SSH_AUTHORIZED_KEYS__ -> ["ssh-ed25519 AAAA..."]   (or removes the line)
+#   __PAYLOAD_FILES__       -> write_files entries for the vm1-honeypot/ tree
+#
+# Resulting guest layout: /opt/honeypot/{docker-compose.yml,ssh-honeypot/,
+# simulator/,promtail/,logs/}. The repository stays the single source of truth;
+# nothing is copied by hand into the VM.
+# ---------------------------------------------------------------------------
+hostname: vm-honeypot
+fqdn: vm-honeypot.sentinel.lab
+manage_etc_hosts: true
+timezone: UTC
+package_update: true
+package_upgrade: false
+ssh_pwauth: true
+disable_root: false
+
+users:
+  - name: soc
+    gecos: KVM-Sentinel-SOC lab operator
+    groups: [adm, sudo, docker]
+    shell: /bin/bash
+    lock_passwd: false
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys: __SSH_AUTHORIZED_KEYS__
+
+chpasswd:
+  expire: false
+  list: |
+    soc:sentinel
+
+packages:
+  - qemu-guest-agent
+  - chrony
+  - curl
+  - ca-certificates
+  - jq
+  - htop
+  - vim
+  - net-tools
+  - tcpdump
+  - rsync
+
+write_files:
+  - path: /etc/motd
+    permissions: '0644'
+    content: |
+      ===================================================================
+       vm-honeypot  (KVM-Sentinel-SOC trap tier)
+      ===================================================================
+       network : 10.10.0.10/24 on virbr1 — isolated, no default route
+       stack   : docker compose in /opt/honeypot
+       logs    : /opt/honeypot/logs/auth.log  (tailed by promtail)
+
+       start a simulated brute force:
+         cd /opt/honeypot && docker compose run --rm simulator
+
+       watch what the SOC receives:
+         tail -f /opt/honeypot/logs/auth.log
+
+       this VM is intentionally weak. It must never hold real data.
+      ===================================================================
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" },
+        "live-restore": true
+      }
+  - path: /usr/local/bin/kvm-sentinel-ready-beacon
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env python3
+      # One-shot completion signal: deploy-lab.sh connects once, then detaches
+      # the bootstrap NIC. Port 9999 is reachable from the host only.
+      import socket
+
+      BEACON = ("10.10.0.10", 9999)
+
+      with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+          srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          srv.bind(BEACON)
+          srv.listen(1)
+          srv.settimeout(1800)
+          try:
+              conn, _ = srv.accept()
+              conn.sendall(b"READY\n")
+              conn.close()
+          except OSError:
+              pass
+  __PAYLOAD_FILES__
+
+runcmd:
+  - install -d -m 0775 /opt/honeypot/logs
+  - curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+  - sh /tmp/get-docker.sh
+  - systemctl enable --now docker
+  - usermod -aG docker soc
+  - bash -c 'docker compose version >/dev/null 2>&1 || (apt-get update && apt-get install -y docker-compose-plugin)'
+  - systemctl enable --now qemu-guest-agent
+  - systemctl enable --now chrony
+  - chown -R soc:soc /opt/honeypot
+  # Build every image now: the bootstrap NAT NIC is detached right after this
+  # boot, so the trap VM will never be able to pull an image again.
+  - bash -c 'set -euo pipefail; cd /opt/honeypot && docker compose build ssh-honeypot simulator'
+  - bash -c 'set -euo pipefail; cd /opt/honeypot && docker compose up -d ssh-honeypot promtail'
+  # The readiness marker and beacon fire only when the trap is actually running:
+  # a failed build would otherwise detach the NAT NIC and leave no way back.
+  - bash -c 'set -euo pipefail; sleep 10; cd /opt/honeypot && docker compose ps --status running --services | grep -qx ssh-honeypot && install -d -m 0755 /var/lib/kvm-sentinel && date -u +%FT%TZ > /var/lib/kvm-sentinel/ready && systemd-run --unit=kvm-sentinel-ready --collect /usr/local/bin/kvm-sentinel-ready-beacon'
+
+final_message: "vm-honeypot ready after $UPTIME seconds (honeypot on 10.10.0.10:2222, SOC logs shipped to 10.10.0.20:3100)"

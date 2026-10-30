@@ -1,0 +1,115 @@
+name: honeypot
+
+# vm-honeypot stack — the trap tier.
+#
+#   ssh-honeypot : OpenSSH listening on VM1:22 (mapped to container 2222),
+#                  auth events written to ./logs/auth.log (rsyslog).
+#   promtail     : ships ./logs/auth.log to vm-soc (10.10.0.20:3100).
+#   simulator    : offline brute-force generator. NOT started by `up -d`
+#                  (profile "manual"); run it explicitly:
+#                      docker compose run --rm simulator
+#
+# Network design, on purpose:
+#   * honeypot-net is `internal: true` — the trap container cannot reach the
+#     internet, not even to phone home through Docker's NAT.
+#   * promtail is on the default bridge instead: it must reach 10.10.0.20:3100,
+#     which is on-link on the VM's eth0. It keeps no privileged access to the
+#     trap network and only mounts its log file read-only.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  ssh-honeypot:
+    build:
+      context: ./ssh-honeypot
+    image: kvm-sentinel/ssh-honeypot:1.0.0
+    container_name: ssh-honeypot
+    restart: unless-stopped
+    ports:
+      # guest 2222, never 22: the cloud image's own sshd owns 22 for admin access
+      - "2222:2222"
+    volumes:
+      # rsyslog writes /var/log/auth.log here; the file is then visible on the
+      # VM at /opt/honeypot/logs/auth.log and tailed by promtail.
+      - ./logs:/var/log
+    networks:
+      - honeypot-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - SYS_CHROOT
+      - NET_BIND_SERVICE
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/2222' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    logging: *default-logging
+
+  simulator:
+    build:
+      context: ./simulator
+    image: kvm-sentinel/simulator:1.0.0
+    container_name: ssh-honeypot-simulator
+    profiles:
+      - manual
+    depends_on:
+      ssh-honeypot:
+        condition: service_healthy
+    networks:
+      honeypot-net:
+        ipv4_address: 172.31.240.66
+    environment:
+      TARGET_HOST: ssh-honeypot
+      TARGET_PORT: "2222"
+      ATTEMPTS_PER_ROUND: "40"
+      DELAY: "0.4"
+    command:
+      - "--target"
+      - "ssh-honeypot"
+      - "--port"
+      - "2222"
+      - "--attempts-per-round"
+      - "40"
+      - "--rounds"
+      - "1"
+      - "--delay"
+      - "0.4"
+    restart: "no"
+    logging: *default-logging
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: promtail
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ./logs:/var/log/honeypot:ro
+    networks:
+      - default
+    logging: *default-logging
+
+networks:
+  honeypot-net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+  default:
+    driver: bridge

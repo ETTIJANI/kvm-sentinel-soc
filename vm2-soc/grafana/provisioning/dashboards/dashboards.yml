@@ -1,0 +1,19 @@
+# Grafana dashboard provider.
+#
+# Grafana scans /etc/grafana/provisioning/dashboards/*.yaml for providers and
+# then loads every .json found in `options.path`. This file is what makes the
+# SOC dashboard appear at first login without clicking "Import".
+apiVersion: 1
+
+providers:
+  - name: kvm-sentinel
+    orgId: 1
+    folder: KVM Sentinel SOC
+    folderUid: kvm-sentinel
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

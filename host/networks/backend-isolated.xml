@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  backend-isolated : the "réseau isolé" of the lab (virbr1, 10.10.0.0/24).
+
+  Design notes:
+    * No <forward> element -> libvirt sets up no forwarding at all (mode 'none'),
+                      so this network cannot route anywhere: no NAT, no routing,
+                      no masquerading. vm-honeypot therefore has no path to the
+                      internet or to the classroom LAN, which is the whole point
+                      of a honeypot tier. Note that <forward mode='none'/> is
+                      rejected by the libvirt >= 10 XML schema; omitting the
+                      element is the supported spelling of "isolated".
+    * No <dhcp> element -> addresses are static, assigned by cloud-init. A
+      DHCP server on the trap network would be pointless noise and one more
+      moving part.
+    * The bridge itself gets 10.10.0.1 so the physical host can reach the two
+      guests (promtail push, agent webhook, restore scripts). This is host ->
+      guest only; guest -> world is still blocked by mode='none'.
+  Defined by host/provisioning/deploy-lab.sh (virsh net-define), not by Nix,
+  because the same XML is reused on Ubuntu/Debian and WSL2 hosts.
+-->
+<network>
+  <name>backend-isolated</name>
+  <bridge name='virbr1' stp='on' delay='0'/>
+  <domain name='sentinel.lab' localOnly='yes'/>
+  <ip address='10.10.0.1' netmask='255.255.255.0'/>
+</network>

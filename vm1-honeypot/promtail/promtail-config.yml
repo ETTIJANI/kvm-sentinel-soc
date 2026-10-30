@@ -1,0 +1,42 @@
+# promtail — log collector on vm-honeypot ("Agent Collector")
+#
+# Tails the auth log produced by the honeypot container and pushes it to Loki on
+# vm-soc over the isolated 10.10.0.0/24 link (10.10.0.20:3100).
+#
+# Labels are intentionally static and low-cardinality: the source IP and the
+# username are parsed by the SOC agents (and by LogQL `regexp` in Grafana)
+# instead of becoming Loki labels. A per-IP label would explode the index as
+# soon as a classroom of 30 students starts scanning.
+#
+# The filename is pinned to avoid accidentally shipping rsyslog's syslog/kern.log.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://10.10.0.20:3100/loki/api/v1/push
+    batchwait: 1s
+    batchsize: 1048576
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 20
+    external_labels:
+      cluster: kvm-sentinel-soc
+
+scrape_configs:
+  - job_name: ssh-honeypot
+    target_config:
+      sync_period: 10s
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: ssh-honeypot
+          host: vm-honeypot
+          source: auth.log
+          __path__: /var/log/honeypot/auth.log

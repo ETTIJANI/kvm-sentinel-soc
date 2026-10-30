@@ -1,0 +1,28 @@
+# cloud-init network-config v2 — vm-honeypot
+#
+# Interfaces are matched on MAC and renamed with set-name, so the guest always
+# sees eth0 (isolated trap NIC) and eth1 (temporary bootstrap NIC) regardless of
+# how many PCI slots the hypervisor exposes.
+#
+# The isolated NIC deliberately has NO gateway and NO default route: the trap
+# must never be able to reach the internet or the classroom LAN.
+version: 2
+ethernets:
+  backend:
+    match:
+      macaddress: "52:54:00:10:10:01"
+    set-name: eth0
+    dhcp4: false
+    addresses:
+      - 10.10.0.10/24
+    routes: []
+    nameservers:
+      addresses: []
+  bootstrap:
+    match:
+      macaddress: "52:54:00:bb:00:01"
+    set-name: eth1
+    dhcp4: true
+    dhcp4-overrides:
+      route-metric: 100
+    optional: true
