@@ -50,9 +50,10 @@ ssh soc@192.168.122.20 'sudo docker compose -f /opt/soc/docker-compose.yml up -d
 
 ## Known Issues
 
-- **Promtail config**: `target_config` field removed in Promtail 3.x (fix pending)
-- **Docker internal network**: `internal: true` blocks host port publishing (fix pending)
-- **SSH key auth**: Home directory permissions may require `chmod 700` (workaround in docs)
+- ~~**Promtail config**: `target_config` field removed in Promtail 3.x~~ (FIXED)
+- ~~**Docker internal network**: `internal: true` blocks host port publishing~~ (FIXED)
+- ~~**SSH key auth**: Home directory permissions may require `chmod 700`~~ (FIXED in cloud-init)
+- ~~**Simulator networking**: Static IP conflict~~ (FIXED)
 - **Promtail → Alloy**: Promtail is in maintenance mode. Grafana Alloy is the successor.
   Migration recommended when Alloy's resource footprint drops below 30 MB.
 

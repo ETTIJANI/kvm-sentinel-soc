@@ -30,8 +30,6 @@ clients:
 
 scrape_configs:
   - job_name: ssh-honeypot
-    target_config:
-      sync_period: 10s
     static_configs:
       - targets:
           - localhost
