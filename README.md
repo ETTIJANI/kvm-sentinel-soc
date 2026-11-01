@@ -37,6 +37,53 @@ sudo python3 host/controller/approval_daemon.py
 ssh soc@192.168.122.20 'sudo docker compose -f /opt/soc/docker-compose.yml up -d'
 ```
 
+## Operations dashboard (tmux)
+
+One session, every moving part, live logs on disk:
+
+```bash
+cp .env.example .env          # once; set DASH_VM*_PASSWORD or use SSH keys
+./scripts/tmux-dashboard.sh   # create or reattach
+```
+
+| Window | Panes | What you watch |
+|---|---|---|
+| `core` | controller, controller-health | approval daemon console + `/health` |
+| `edge` | honeypot-logs, promtail-logs, trap-probe | trap tier and its log shipper |
+| `brain` | agents, loki, grafana, ollama | AI pipeline and observability (2x2) |
+| `infra` | libvirt-state, live-fire, host-resources | domains, DNAT rules, disk/RAM |
+| `integrations` | loki-ingress, incidents | promtail→Loki path, audit trail |
+| `logs` | all-logs, errors | merged tails, error-only tail |
+| `health` | status | full `dashboard-status.sh` table |
+| `shell` | shell | manual debugging (transcript saved) |
+| `dashboard` | overview, pane-map | compact status + pane list |
+
+```bash
+./scripts/tmux-dashboard.sh              # create or attach (idempotent)
+./scripts/tmux-dashboard.sh --status     # health snapshot (exit 1 on FAIL)
+./scripts/tmux-dashboard.sh --logs       # focus the logs window
+./scripts/tmux-dashboard.sh --stop       # stop dashboard-started processes
+./scripts/tmux-dashboard.sh --restart
+./scripts/dashboard-status.sh --watch 5 --compact
+./scripts/tmux-dashboard-stop.sh --stop-stacks --stop-vms
+```
+
+Logs land in `logs/tmux-dashboard/` (`<component>.log`, `bootstrap.log`,
+`status.log`, `shell-session.log`). PIDs are recorded with their start time in
+`logs/tmux-dashboard/run/<session>/pids/`, so `--stop` never kills a reused PID
+and never touches processes the dashboard did not start.
+
+The dashboard does not generate attacks: the `shell` window prints the exact
+manual command (`docker compose run --rm simulator`).
+
+Troubleshooting:
+
+- `ssh unreachable` panes → start the lab (`sudo ./host/provisioning/deploy-lab.sh`) or set `DASH_VM*_PASSWORD` / install `sshpass`.
+- controller pane dies with a bind error → `192.168.122.1` is down: `sudo virsh net-start default`.
+- panes report `compose ps failed` → stack not up; read `logs/tmux-dashboard/bootstrap.log`.
+- `live-fire` shows SKIP → needs root: `sudo ./host/provisioning/enable-live-fire.sh status`.
+- stale session → `./scripts/tmux-dashboard.sh --stop` then relaunch.
+
 ## Documentation
 
 | Guide | Description |

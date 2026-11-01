@@ -19,6 +19,9 @@ vm1-honeypot/.env
 vm2-soc/state/
 vm2-soc/.env
 
+# dashboard runtime: per-component logs, pidfiles, shell transcripts
+logs/
+
 # Incident reports are generated during a session; only the directory marker
 # is versioned
 vm2-soc/reports/*.md

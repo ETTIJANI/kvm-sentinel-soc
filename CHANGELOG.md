@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CONTRIBUTING.md` with Conventional Commits convention
 - `docs/ARCHITECTURE.md` extracted from README for readability
 - `docs/TROUBLESHOOTING.md` extracted from README
+- tmux operations dashboard: `scripts/tmux-dashboard.sh` (create/attach/status/logs/stop),
+  `scripts/dashboard-status.sh` (health snapshot, watch, JSON, per-section),
+  `scripts/tmux-dashboard-stop.sh` (PID-safe teardown), `.env.example`, README section
 
 ### Changed
 - `README.md` restructured for conciseness (452 → ~120 lines)
