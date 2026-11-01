@@ -18,8 +18,8 @@ The repository provides a proper NixOS module (`host/nixos/virtualization.nix`) 
    nix.settings.experimental-features = [ "nix-command" "flakes" ];
    ```
 
-3. **~25 GiB free** on the filesystem that will hold the images (the base cloud image is ~600 MiB,
-   the two overlays grow on demand up to 20 + 30 GiB).
+3. **~20 GiB free** on the filesystem that will hold the images (the base cloud image is ~600 MiB,
+   the two overlays grow on demand up to 10 + 15 GiB).
 4. The repository cloned somewhere stable, for example `/home/alice/kvm-sentinel-soc`.
 
 ---

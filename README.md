@@ -15,7 +15,7 @@ Two VMs, one hypervisor, one human in the loop.
 
 ## Prerequisites
 
-- **Hardware**: Intel/AMD CPU with VT-x/AMD-V, ≥16 GiB RAM, ≥80 GiB disk
+- **Hardware**: Intel/AMD CPU with VT-x/AMD-V, ≥8 GiB RAM, ≥30 GiB disk
 - **OS**: NixOS 24.05+ / Ubuntu 22.04+ / Debian 12+ / Windows 11 + WSL2
 - **Software**: KVM/libvirt, Docker 24+, Python 3.11+, QEMU 8+
 

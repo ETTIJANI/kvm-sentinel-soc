@@ -60,9 +60,9 @@ The trap container cannot reach the internet. Isolation is enforced at the KVM l
 
 | VM | RAM | vCPU | Disk | OS |
 |---|---|---|---|---|
-| vm-honeypot | 1 GiB | 1 | 20 GiB | Ubuntu 24.04 |
-| vm-soc | 5 GiB | 4 | 30 GiB | Ubuntu 24.04 |
-| **Total** | **6 GiB** | **5** | **50 GiB** | |
+| vm-honeypot | 1 GiB | 1 | 10 GiB | Ubuntu 24.04 |
+| vm-soc | 4 GiB | 4 | 15 GiB | Ubuntu 24.04 |
+| **Total** | **5 GiB** | **5** | **25 GiB** | |
 
 ## Repository Layout
 
@@ -123,7 +123,7 @@ KVM-AISOC/
 | Hypervisor | KVM/libvirt | Native Linux, academic standard |
 | Log shipper | Promtail 3.2 | Lightweight (~15 MB), simple YAML config |
 | Log store | Loki 3.2 | LogQL, low resource, Grafana-native |
-| LLM | Ollama + qwen2.5:0.5b | CPU-only, fits in 5 GiB VM |
+| LLM | Ollama + qwen2.5:0.5b | CPU-only, fits in 4 GiB VM |
 | Dashboard | Grafana 11.2 | Provisioned dashboards, Loki datasource |
 | Controller | Flask + Rich | Simple webhook, beautiful terminal UI |
 | OS | Ubuntu 24.04 | LTS, cloud images available, wide support |

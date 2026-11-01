@@ -15,8 +15,8 @@ Tested shape: Windows 11 23H2, WSL 2.x, Ubuntu 24.04 distro, 16 GiB RAM, Intel V
 | Windows 11 22H2 or newer | `winver` |
 | Hardware virtualization enabled | Task Manager → Performance → CPU → *Virtualization: Enabled* |
 | WSL2 with nested virtualization | WSL 2.0+ (`wsl --version`) |
-| ≥ 40 GiB free on the system drive | VHDX grows to ~35 GiB with both guests |
-| ≥ 12 GiB RAM | the lab needs ~7 GiB inside WSL |
+| ≥ 20 GiB free on the system drive | VHDX grows to ~20 GiB with both guests |
+| ≥ 8 GiB RAM | the lab needs ~5 GiB inside WSL |
 
 On Windows 11 **Home**, Virtual Machine Platform and WSL are supported; Hyper-V manager is not
 needed.
@@ -225,7 +225,7 @@ whole point. Use it only for an unattended soak test, and say so when presenting
 | Nested virtualization overhead | guests boot ~2× slower, LLM tokens/s lower | `--wait-timeout 2400`, expect 60–90 s first AI response |
 | WSL IP changes on restart | portproxy + socat die | re-run §6.1/§6.2 after `wsl --shutdown` |
 | iptables state is ephemeral | live-fire rules vanish | `enable-live-fire.sh enable` after each restart |
-| VHDX grows monotonically | disk can reach ~35 GiB | `wsl --manage Ubuntu-24.04 --set-sparse true` (WSL 2.2+) |
+| VHDX grows monotonically | disk can reach ~20 GiB | `wsl --manage Ubuntu-24.04 --set-sparse true` (WSL 2.2+) |
 | No GPU passthrough | Ollama is CPU-only | use `qwen2.5:0.5b` (already the default) |
 | Sleep/hibernate kills guests | VMs stop abruptly | run `cleanup-lab.sh` before closing the lid, or keep the laptop awake |
 | Windows Defender may scan the VHDX | random I/O stalls during snapshots | exclude `%LOCALAPPDATA%\Packages\...\LocalState\ext4.vhdx` |

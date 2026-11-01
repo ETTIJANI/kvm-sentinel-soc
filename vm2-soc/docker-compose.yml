@@ -8,7 +8,7 @@ name: soc
 #   ollama-init : one-shot model pull, so a fresh VM needs no manual step.
 #   agents      : the 4-agent pipeline (parse -> detect -> analyse -> report).
 #
-# Memory budget of this VM: 5 GiB.
+# Memory budget of this VM: 4 GiB.
 #   loki ~250 MB, grafana ~150 MB, ollama+0.5b model ~900 MB, agents ~120 MB,
 #   the rest is page cache and Docker overhead.
 #

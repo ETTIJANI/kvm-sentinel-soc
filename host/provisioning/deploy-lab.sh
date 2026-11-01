@@ -5,8 +5,8 @@
 # Creates:
 #   * the isolated libvirt network  backend-isolated (virbr1, 10.10.0.0/24)
 #   * two Ubuntu 24.04 cloud-image guests backed by QCOW2 overlays
-#       vm-honeypot : 1 GiB / 1 vCPU / 20 GiB  (10.10.0.10)
-#       vm-soc      : 5 GiB / 4 vCPU / 30 GiB  (192.168.122.20 + 10.10.0.20)
+#       vm-honeypot : 1 GiB / 1 vCPU / 10 GiB  (10.10.0.10)
+#       vm-soc      : 4 GiB / 4 vCPU / 15 GiB  (192.168.122.20 + 10.10.0.20)
 #   * NoCloud seed ISOs rendered from cloud-init-vm1/ and cloud-init-vm2/
 #
 # Why vm-honeypot gets a temporary second NIC:
@@ -148,7 +148,7 @@ preflight() {
   local ram_mb
   ram_mb="$(awk '/^MemAvailable:/ { printf "%d", $2 / 1024 }' /proc/meminfo)"
   if (( ram_mb < 7000 )); then
-    die "only ${ram_mb} MiB RAM available, the lab needs ~7000 MiB (1024 + 5120 + QEMU overhead). Close applications and retry."
+    die "only ${ram_mb} MiB RAM available, the lab needs ~5500 MiB (1024 + 4096 + QEMU overhead). Close applications and retry."
   fi
   local disk_mb
   disk_mb="$(df -Pm "$IMAGE_DIR" | awk 'NR==2 { print $4 }')"
@@ -406,12 +406,12 @@ create_vm2() {
   if domain_exists "$VM2"; then
     die "$VM2 is already defined. Use --force (destroys it) or cleanup-lab.sh."
   fi
-  info "creating $VM2 (5 GiB / 4 vCPU)"
+  info "creating $VM2 (4 GiB / 4 vCPU)"
   virt-install \
     --connect qemu:///system \
     --name "$VM2" \
     --description "KVM-Sentinel-SOC brain: Loki, Grafana, Ollama, AI agents" \
-    --memory 5120 \
+    --memory 4096 \
     --vcpus 4,sockets=1,cores=4,threads=1 \
     --cpu host-passthrough \
     --osinfo ubuntu24.04 \
@@ -559,8 +559,8 @@ main() {
   ensure_networks
   destroy_existing
   fetch_base_image
-  create_overlays "$VM1" "$IMAGE_DIR/$VM1.qcow2" "20G"
-  create_overlays "$VM2" "$IMAGE_DIR/$VM2.qcow2" "30G"
+  create_overlays "$VM1" "$IMAGE_DIR/$VM1.qcow2" "10G"
+  create_overlays "$VM2" "$IMAGE_DIR/$VM2.qcow2" "15G"
 
   info "rendering cloud-init user-data"
   collect_ssh_keys

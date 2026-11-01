@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md` restructured for conciseness (452 → ~120 lines)
 - Port mapping corrected: trap moved from guest 22 to 2222 (avoids collision with admin sshd)
 - Detection threshold wording: "more than 5" → "5 or more" (matches code)
+- Storage budget reduced: 50 GiB → 25 GiB (vm-honeypot 20→10 GiB, vm-soc 30→15 GiB)
+- RAM budget reduced: 6 GiB → 5 GiB (vm-soc 5→4 GiB)
 
 ### Fixed
 - `backend-isolated.xml`: removed invalid `<forward mode='none'/>` (libvirt ≥10/12)
