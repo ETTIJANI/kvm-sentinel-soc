@@ -1,6 +1,6 @@
 # 02 — Installing KVM-Sentinel-SOC on Ubuntu / Debian
 
-Target: Ubuntu 24.04 LTS or Debian 12 host with hardware virtualization, ~25 GiB free disk and
+Target: Ubuntu 24.04 LTS or Debian 12 host with hardware virtualization, ~20 GiB free disk and
 ~7 GiB free RAM. This is the "classic" apt-based path; the NixOS path is in
 [01-INSTALL-NIXOS.md](01-INSTALL-NIXOS.md).
 
@@ -11,7 +11,7 @@ Target: Ubuntu 24.04 LTS or Debian 12 host with hardware virtualization, ~25 GiB
 ```bash
 egrep -c '(vmx|svm)' /proc/cpuinfo     # must be > 0
 free -h                                # >= 7 GiB available
-df -h /var/lib/libvirt                 # >= 25 GiB free
+df -h /var/lib/libvirt                 # >= 20 GiB free
 ```
 
 If `(vmx|svm)` is 0, enable Intel VT-x / AMD-V in the firmware and reboot.
