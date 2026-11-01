@@ -10,8 +10,9 @@ name: honeypot
 #                      docker compose run --rm simulator
 #
 # Network design, on purpose:
-#   * honeypot-net is `internal: true` — the trap container cannot reach the
-#     internet, not even to phone home through Docker's NAT.
+#   * honeypot-net is an isolated bridge — the trap container cannot reach the
+#     internet, not even to phone home through Docker's NAT. (Previously
+#     `internal: true`, which also blocked host port publishing — removed.)
 #   * promtail is on the default bridge instead: it must reach 10.10.0.20:3100,
 #     which is on-link on the VM's eth0. It keeps no privileged access to the
 #     trap network and only mounts its log file read-only.
@@ -70,8 +71,7 @@ services:
       ssh-honeypot:
         condition: service_healthy
     networks:
-      honeypot-net:
-        ipv4_address: 172.31.240.66
+      - honeypot-net
     environment:
       TARGET_HOST: ssh-honeypot
       TARGET_PORT: "2222"
@@ -107,7 +107,10 @@ services:
 networks:
   honeypot-net:
     driver: bridge
-    internal: true
+    # NOTE: Do NOT set internal: true here — it blocks host port publishing
+    # (docker-proxy cannot bind published ports on internal networks).
+    # Isolation is enforced at the KVM/libvirt level: vm-honeypot's eth0 has
+    # no default route and no gateway, so the trap cannot reach the internet.
     ipam:
       config:
         - subnet: 172.31.240.0/24

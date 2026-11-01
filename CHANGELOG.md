@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `enable-live-fire.sh`: `flush_rules()` strips quotes from iptables output
 - `agent_analyste.py`: timeout reduced 180s → 25s with startup `warm_up()`
 - `approval_daemon.py`: removed 0.0.0.0 bind fallback (security fix)
+- `docker-compose.yml`: removed `internal: true` from honeypot-net (blocked host port publishing)
+- `promtail-config.yml`: removed invalid `target_config` field (Promtail 3.x)
+- `docker-compose.yml`: removed static IP from simulator (address conflict)
+- `cloud-init-vm1/user-data`: added SSH key permission fix (StrictModes)
+- `cloud-init-vm2/user-data`: added SSH key permission fix (StrictModes)
 
 ## [0.1.0] - 2026-10-30
 

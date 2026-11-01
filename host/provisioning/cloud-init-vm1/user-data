@@ -96,6 +96,12 @@ write_files:
   __PAYLOAD_FILES__
 
 runcmd:
+  # Fix SSH key permissions: cloud-init creates the directory with group-write
+  # which triggers sshd StrictModes and silently rejects the authorized key.
+  - chown -R soc:soc /home/soc
+  - chmod 700 /home/soc
+  - chmod 700 /home/soc/.ssh
+  - chmod 600 /home/soc/.ssh/authorized_keys
   - install -d -m 0775 /opt/honeypot/logs
   - curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
   - sh /tmp/get-docker.sh

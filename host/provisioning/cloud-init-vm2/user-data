@@ -84,6 +84,11 @@ runcmd:
   - bash -c 'docker compose version >/dev/null 2>&1 || (apt-get update && apt-get install -y docker-compose-plugin)'
   - systemctl enable --now qemu-guest-agent
   - systemctl enable --now chrony
+  # Fix SSH key permissions (same StrictModes issue as vm1).
+  - chown -R soc:soc /home/soc
+  - chmod 700 /home/soc
+  - chmod 700 /home/soc/.ssh
+  - chmod 600 /home/soc/.ssh/authorized_keys
   - chown -R soc:soc /opt/soc
   - chown -R 10002:10002 /opt/soc/reports
   - bash -c 'cd /opt/soc && docker compose up -d --build'
