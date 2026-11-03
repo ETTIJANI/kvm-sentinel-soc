@@ -358,7 +358,9 @@ def perform_quarantine(cfg: Config, mac: str) -> dict[str, Any]:
     if cfg.dry_run:
         console.print("[yellow]dry-run:[/yellow] " + " ".join([VIRSH, "-c", LIBVIRT_URI, *snapshot_cmd]))
         console.print("[yellow]dry-run:[/yellow] " + " ".join([VIRSH, "-c", LIBVIRT_URI, *link_cmd]))
-        result["snapshot_ok"] = result["quarantine_ok"] = True
+        # Dry-run must never claim that the hypervisor was changed.  The audit
+        # trail keeps the approved decision, but marks both actions as not run.
+        result["dry_run"] = True
         return result
 
     rc, out, err = run_virsh(snapshot_cmd)
@@ -483,7 +485,10 @@ def process_alert(cfg: Config, alert: dict[str, Any]) -> None:
     if approved:
         result = perform_quarantine(cfg, mac)
         with cfg.lock:
-            cfg.stats["approved" if result.get("quarantine_ok") else "failed"] += 1
+            if result.get("dry_run") or result.get("quarantine_ok"):
+                cfg.stats["approved"] += 1
+            else:
+                cfg.stats["failed"] += 1
         if result.get("quarantine_ok"):
             console.print(Panel(
                 "Honeypot quarantined. Evidence preserved as a live snapshot.\n"
