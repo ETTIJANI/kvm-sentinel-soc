@@ -80,6 +80,7 @@ init_config() {
   VM2_SSH_USER="${DASH_VM2_USER:-soc}"
   VM2_PASSWORD="${DASH_VM2_PASSWORD:-}"
   VM2_COMPOSE_DIR="${DASH_VM2_COMPOSE_DIR:-/opt/soc}"
+  SSH_KEY="${DASH_SSH_KEY:-}"
 
   LOKI_URL="${DASH_LOKI_URL:-http://192.168.122.20:3100}"
   GRAFANA_URL="${DASH_GRAFANA_URL:-http://192.168.122.20:3000}"
@@ -176,6 +177,9 @@ build_ssh() {
   esac
   local -a opts=(-o ConnectTimeout=6 -o ServerAliveInterval=15 -o ServerAliveCountMax=3
                  -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR)
+  if [[ -n "$SSH_KEY" ]]; then
+    opts+=(-i "$SSH_KEY")
+  fi
   if [[ -n "$password" ]] && have sshpass; then
     SSH_ARGV=(sshpass -p "$password" ssh "${opts[@]}" -p "$port" "$user@$host")
   else
@@ -202,6 +206,12 @@ ssh_reachable() {
     vm2) tcp_open "$VM2_SSH_HOST" "$VM2_SSH_PORT" ;;
     *) return 1 ;;
   esac
+}
+
+ssh_probe() {
+  local node="$1"
+  build_ssh "$node"
+  timeout 8 "${SSH_ARGV[@]}" true >/dev/null 2>&1
 }
 
 # --------------------------------------------------------------------------- #
@@ -396,10 +406,14 @@ bootstrap_stacks() {
     warn "--skip-stacks: not starting Docker stacks"
     return 0
   fi
-  local node
+  local node vm2_stack_ok=0
   for node in vm1 vm2; do
     if ! ssh_reachable "$node"; then
       warn "$node is unreachable: stack not started (panes will show the error)"
+      continue
+    fi
+    if ! ssh_probe "$node"; then
+      warn "$node SSH authentication failed: stack not started (set DASH_SSH_KEY or DASH_VM*_PASSWORD)"
       continue
     fi
     info "starting the $node compose stack (timeout ${STACK_TIMEOUT}s)"
@@ -408,21 +422,24 @@ bootstrap_stacks() {
     command="$(remote_compose "$node" up -d)"
     if timeout "$STACK_TIMEOUT" "${SSH_ARGV[@]}" "$command" >>"$LOG_DIR/bootstrap.log" 2>&1; then
       ok "$node compose stack is up"
+      if [[ "$node" == vm2 ]]; then
+        vm2_stack_ok=1
+      fi
     else
       warn "$node compose up failed; see $LOG_DIR/bootstrap.log"
     fi
   done
   # Loki must be ready before the agents pane is useful; compose already gates
   # on it, this is the dashboard-side confirmation. Skip the wait entirely when
-  # vm-soc is unreachable: there is nothing to wait for and it would stall launch.
-  if ssh_reachable vm2; then
+  # vm-soc is unreachable or its stack failed: there is nothing to wait for.
+  if ((vm2_stack_ok)) && ssh_probe vm2; then
     if wait_http "$LOKI_URL/ready" "$READY_TIMEOUT" "loki"; then
       ok "loki /ready"
     else
       warn "loki not ready after ${READY_TIMEOUT}s (is vm-soc running?)"
     fi
   else
-    warn "vm-soc unreachable: skipping the Loki readiness wait"
+    warn "vm-soc stack did not start: skipping the Loki readiness wait"
   fi
 }
 
