@@ -3,7 +3,7 @@
 # deploy-lab.sh — build the KVM-Sentinel-SOC lab from a bare libvirt host.
 #
 # Creates:
-#   * the isolated libvirt network  backend-isolated (virbr1, 10.10.0.0/24)
+#   * the isolated libvirt network backend-isolated (virbr1, 10.10.0.0/24)
 #   * two Ubuntu 24.04 cloud-image guests backed by QCOW2 overlays
 #       vm-honeypot : 1 GiB / 1 vCPU / 10 GiB  (10.10.0.10)
 #       vm-soc      : 4 GiB / 4 vCPU / 15 GiB  (192.168.122.20 + 10.10.0.20)
@@ -75,7 +75,10 @@ usage() {
   cat <<EOF
 KVM-Sentinel-SOC — lab provisioning
 
-Usage: sudo ./host/provisioning/deploy-lab.sh [options]
+Usage: ./host/provisioning/deploy-lab.sh [options]
+
+  Runs as root or, on hosts where polkit lets members of the 'libvirtd'
+  group manage qemu:///system (NixOS default), as that unprivileged user.
 
 Options:
   --force                 destroy existing lab domains/overlays and redeploy
@@ -93,10 +96,52 @@ After a successful run:
 EOF
 }
 
-require_root() {
-  if [[ ${EUID} -ne 0 ]]; then
-    die "run as root (sudo) or as a member of the libvirtd group with sudo: sudo $0 $*"
+require_privileges() {
+  if [[ ${EUID} -eq 0 ]]; then
+    return 0
   fi
+  # Unprivileged operation is supported when polkit authorises this user to
+  # manage qemu:///system (a 'libvirtd' group member on NixOS). Every libvirt
+  # call below uses the system connection, so the hypervisor still runs the
+  # guests as its own service account.
+  if ! virsh -c qemu:///system uri >/dev/null 2>&1; then
+    die "cannot talk to qemu:///system. Run with sudo, or join the 'libvirtd' group and re-login."
+  fi
+  if [[ " $(id -nG) " != *" libvirtd "* ]]; then
+    die "$(id -un) is not in the 'libvirtd' group; run with sudo: sudo $0 $*"
+  fi
+  info "unprivileged mode: managing qemu:///system through libvirt/polkit"
+}
+
+# On rootless NixOS, qemu:///system launches guests as the qemu-libvirtd
+# service account while the lab lives under $HOME (usually mode 0700). Grant
+# that account traverse access to the home directory and read/write access to
+# the disks this run just created. No-op as root or when the account is absent.
+grant_qemu_access() {
+  (( EUID == 0 )) && return 0
+  getent passwd qemu-libvirtd >/dev/null 2>&1 || return 0
+  if ! command -v setfacl >/dev/null 2>&1; then
+    warn "setfacl not found; if a domain fails with EACCES, install 'acl' or run with sudo"
+    return 0
+  fi
+
+  setfacl -m u:qemu-libvirtd:--x "$HOME" 2>/dev/null \
+    || warn "could not add a traverse ACL on $HOME"
+  local path="$REPO_ROOT"
+  while [[ "$path" != "$HOME" && "$path" != "/" ]]; do
+    setfacl -m u:qemu-libvirtd:r-x "$path" 2>/dev/null || true
+    path="$(dirname -- "$path")"
+  done
+
+  local dir file
+  for dir in "$IMAGE_DIR" "$SEED_DIR" "$BUILD_DIR"; do
+    [[ -d "$dir" ]] && setfacl -m u:qemu-libvirtd:r-x "$dir" 2>/dev/null || true
+  done
+  [[ -f "$BASE_IMAGE" ]] && setfacl -m u:qemu-libvirtd:r-- "$BASE_IMAGE" 2>/dev/null || true
+  for file in "$IMAGE_DIR/$VM1.qcow2" "$IMAGE_DIR/$VM2.qcow2"; do
+    [[ -f "$file" ]] && setfacl -m u:qemu-libvirtd:rw- "$file" 2>/dev/null || true
+  done
+  ok "granted qemu-libvirtd access to the lab disks (rootless hypervisor)"
 }
 
 require_cmd() {
@@ -118,7 +163,7 @@ while (($#)); do
 done
 
 [[ "$WAIT_TIMEOUT" =~ ^[0-9]+$ ]] || die "--wait-timeout must be a number of seconds"
-require_root "$@"
+require_privileges "$@"
 
 # ------------------------------------------------------------------ preflight
 preflight() {
@@ -168,7 +213,7 @@ ensure_networks() {
 
   if ! virsh -c qemu:///system net-info default >/dev/null 2>&1; then
     warn "libvirt network 'default' is not defined; virt-install will fail for the bootstrap NIC"
-  elif ! virsh -c qemu:///system net-info default | grep -Eq '^Active:[[:space:]]+yes'; then
+  elif [[ "$(virsh -c qemu:///system net-info default | awk '/^Active:/ { print $2 }')" != "yes" ]]; then
     info "starting libvirt network 'default'"
     virsh -c qemu:///system net-start default >/dev/null
     virsh -c qemu:///system net-autostart default >/dev/null
@@ -179,7 +224,7 @@ ensure_networks() {
     virsh -c qemu:///system net-define "$NET_XML" >/dev/null
     virsh -c qemu:///system net-autostart backend-isolated >/dev/null
     virsh -c qemu:///system net-start backend-isolated >/dev/null
-  elif ! virsh -c qemu:///system net-info backend-isolated | grep -Eq '^Active:[[:space:]]+yes'; then
+  elif [[ "$(virsh -c qemu:///system net-info backend-isolated | awk '/^Active:/ { print $2 }')" != "yes" ]]; then
     info "starting backend-isolated"
     virsh -c qemu:///system net-start backend-isolated >/dev/null
   fi
@@ -187,10 +232,10 @@ ensure_networks() {
   # The bridge address is what the host uses to reach the guests (and what the
   # MASQUERADE rule rewrites to). Give libvirt a moment to apply it.
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    ip -4 addr show virbr1 2>/dev/null | grep -q "10.10.0.1" && break
+    ip -4 addr show virbr1 2>/dev/null | grep -F "10.10.0.1" >/dev/null 2>&1 && break
     sleep 1
   done
-  ip -4 addr show virbr1 2>/dev/null | grep -q "10.10.0.1" \
+  ip -4 addr show virbr1 2>/dev/null | grep -F "10.10.0.1" >/dev/null 2>&1 \
     || die "virbr1 does not carry 10.10.0.1 — inspect 'virsh net-dumpxml backend-isolated' and 'ip addr show virbr1'"
 
   ok "networks ready (virbr0 192.168.122.0/24 NAT, virbr1 10.10.0.0/24 isolated)"
@@ -345,11 +390,11 @@ PY
 }
 
 build_seed() {
-  local vm="$1"
+  local vm="$1" cidir="$2"
   local seed="$SEED_DIR/$vm-seed.iso"
   local user_data="$BUILD_DIR/$vm-user-data"
-  local meta_data="$SCRIPT_DIR/cloud-init-$vm/meta-data"
-  local net_config="$SCRIPT_DIR/cloud-init-$vm/network-config"
+  local meta_data="$SCRIPT_DIR/$cidir/meta-data"
+  local net_config="$SCRIPT_DIR/$cidir/network-config"
 
   rm -f -- "$seed"
   if command -v cloud-localds >/dev/null 2>&1; then
@@ -508,7 +553,7 @@ detach_bootstrap_nic() {
 
 create_baseline_snapshot() {
   (( BASELINE_SNAPSHOT == 1 )) || { info "skipping baseline snapshot (--no-baseline-snapshot)"; return 0; }
-  if virsh -c qemu:///system snapshot-list "$VM1" --name 2>/dev/null | grep -qx 'clean-baseline'; then
+  if virsh -c qemu:///system snapshot-list "$VM1" --name 2>/dev/null | grep -x 'clean-baseline' >/dev/null 2>&1; then
     ok "baseline snapshot 'clean-baseline' already exists"
     return 0
   fi
@@ -561,6 +606,7 @@ main() {
   fetch_base_image
   create_overlays "$VM1" "$IMAGE_DIR/$VM1.qcow2" "10G"
   create_overlays "$VM2" "$IMAGE_DIR/$VM2.qcow2" "15G"
+  grant_qemu_access
 
   info "rendering cloud-init user-data"
   collect_ssh_keys
@@ -574,8 +620,8 @@ main() {
   render_user_data "$VM2" "$SCRIPT_DIR/cloud-init-vm2/user-data" \
     "$REPO_ROOT/vm2-soc" "/opt/soc" "$BUILD_DIR/$VM2-user-data"
 
-  build_seed "$VM1"
-  build_seed "$VM2"
+  build_seed "$VM1" cloud-init-vm1
+  build_seed "$VM2" cloud-init-vm2
 
   create_vm1
   create_vm2
