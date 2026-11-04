@@ -1,7 +1,8 @@
 # 01 — Installing KVM-Sentinel-SOC on NixOS
 
 Target: the reference host, an **Intel Core i7-1160G7** laptop with **16 GiB RAM**
-(≈11–12 GiB free) running **NixOS 25.05** with flakes enabled.
+(≈11–12 GiB free) running **NixOS 25.05+** with flakes enabled. The unprivileged path below was
+validated on NixOS 26.05.
 
 The repository provides a proper NixOS module (`host/nixos/virtualization.nix`) and a dev shell
 (`host/nixos/flake.nix`). Nothing is imperative: no `apt install`, no manual `systemctl enable`.
@@ -161,14 +162,23 @@ sudo nft list ruleset | grep -A2 virbr
 
 ```bash
 cd ~/kvm-sentinel-soc
-sudo ./host/provisioning/deploy-lab.sh
+./host/provisioning/deploy-lab.sh
 ```
+
+Run it as a member of `libvirtd` and `kvm`; the script manages `qemu:///system` through polkit.
+If `virsh -c qemu:///system uri` fails for your user, run the script with `sudo` or re-login after
+adding the groups. The script grants the `qemu-libvirtd` account ACLs to the lab paths so the
+rootless hypervisor can open the QCOW2 overlays.
 
 First run takes 10–15 minutes: it downloads the Ubuntu 24.04 cloud image, verifies its SHA256,
 creates the QCOW2 overlays, renders the cloud-init seeds from this repository, installs both guests
 and waits until the management sshd (`10.10.0.10:22`), the trap (`10.10.0.10:2222`), Grafana
-(`192.168.122.20:3000`) and Ollama (`192.168.122.20:11434`) answer. It then detaches the honeypot's temporary NAT NIC and creates the
-`clean-baseline` snapshot.
+(`192.168.122.20:3000`) and Ollama (`192.168.122.20:11434`) answer. It then detaches the honeypot's
+temporary NAT NIC and creates the `clean-baseline` snapshot.
+
+If the host cannot pull the Ollama image/model, readiness still waits at `11434`. The agents use a
+deterministic heuristic when Ollama is unavailable; pre-pull the model or plan for a manual
+completion on bandwidth-constrained links.
 
 Useful flags:
 
@@ -200,9 +210,62 @@ curl -s http://192.168.122.20:11434/api/tags
 Then start the controller and run the first simulation:
 
 ```bash
-sudo python3 host/controller/approval_daemon.py
+python3 host/controller/approval_daemon.py
 # in another terminal
 ssh soc@10.10.0.10 'cd /opt/honeypot && docker compose run --rm simulator'
+```
+
+If `vm-soc` cannot reach `192.168.122.1:5000`, use the container fallback in §8.1.
+
+### 8.1 Rootless NixOS deployment and the webhook firewall
+
+The unprivileged path was validated on NixOS 26.05. A user in `libvirtd` and `kvm` can deploy and
+operate the lab without `sudo`:
+
+```bash
+./host/provisioning/deploy-lab.sh
+virsh -c qemu:///system list --all
+```
+
+On some NixOS hosts, the guest-to-host path to a host-bound controller on TCP `5000` is still
+filtered even when `networking.firewall.allowedTCPPorts` lists `5000`. Publish the controller from
+a container bound to `virbr0` instead:
+
+```bash
+PYTHON_BIN="$(readlink -f "$(command -v python3)")"
+PY_TAG="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+PY_USER_SITE="$(python3 -c 'import site; print(site.getusersitepackages())')"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kvm-sentinel"
+mkdir -p "$STATE_DIR"
+docker rm -f sentinel-daemon 2>/dev/null || true
+docker run -d --name sentinel-daemon --restart unless-stopped \
+  -p 192.168.122.1:5000:5000 \
+  -e PATH=/run/current-system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  -e HOME=/root -e SUDO_USER="$USER" -e PYTHONDONTWRITEBYTECODE=1 \
+  -v /nix/store:/nix/store:ro \
+  -v /run/current-system:/run/current-system:ro \
+  -v /run/libvirt:/run/libvirt:ro \
+  -v /var/run/libvirt:/var/run/libvirt:ro \
+  -v "$PWD:/app:ro" \
+  -v "$PY_USER_SITE:/root/.local/lib/python${PY_TAG}/site-packages:ro" \
+  -v "$STATE_DIR:/state" \
+  --entrypoint "$PYTHON_BIN" \
+  alpine:latest /app/host/controller/approval_daemon.py \
+  --host 0.0.0.0 --port 5000 \
+  --token "${SENTINEL_TOKEN:?export SENTINEL_TOKEN first}" \
+  --audit-log /state/incidents.jsonl
+```
+
+The container uses the host Nix Python and user site-packages, so a second Python image is not
+needed. Docker publishes the port on `virbr0`; the audit file lives on the host at
+`$STATE_DIR/incidents.jsonl`. Set `SENTINEL_TOKEN` to the same value as the token in
+`/opt/soc/.env`, and change both from the demo default before exposing the lab.
+
+Verify the guest-to-host path and the controller:
+
+```bash
+ssh soc@192.168.122.20 'curl -s http://192.168.122.1:5000/health'
+curl -s http://192.168.122.1:5000/health
 ```
 
 ---
@@ -218,6 +281,9 @@ ssh soc@10.10.0.10 'cd /opt/honeypot && docker compose run --rm simulator'
 | `nix develop` is very slow the first time | evaluating/downloading nixpkgs | expected once; subsequent starts are cached |
 | Live-fire rules disappear after reboot | iptables rules are not persistent | re-run `enable-live-fire.sh enable` (by design) |
 | Grafana unreachable from another machine | NixOS firewall only opened 3000 on the host, and Grafana binds inside the VM | Grafana is meant to be reached at `192.168.122.20:3000` from the host, or via an SSH tunnel |
+| deploy fails with `EACCES` opening a QCOW2 | rootless `qemu-libvirtd` cannot traverse `$HOME` | add `acl` to `systemPackages`, re-run the script, or run it with `sudo` |
+| `vm-soc` cannot reach `192.168.122.1:5000` | NixOS firewall filters the host-bound controller | use the Docker-published controller in §8.1 |
+| deploy waits at `11434` | Ollama image/model pull is slow or offline | pre-pull the model, or complete manually; agents fall back to heuristics |
 
 ---
 

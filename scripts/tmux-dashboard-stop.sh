@@ -39,6 +39,7 @@ init_config() {
   VM2_SSH_USER="${DASH_VM2_USER:-soc}"
   VM2_PASSWORD="${DASH_VM2_PASSWORD:-}"
   VM2_COMPOSE_DIR="${DASH_VM2_COMPOSE_DIR:-/opt/soc}"
+  SSH_KEY="${DASH_SSH_KEY:-}"
 
   if [[ -n ${NO_COLOR:-} || -n ${QUIET:-} ]]; then
     C_RESET=""; C_INFO=""; C_OK=""; C_WARN=""; C_ERR=""
@@ -93,6 +94,9 @@ build_ssh() {
     *) return 1 ;;
   esac
   local -a opts=(-o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR)
+  if [[ -n "$SSH_KEY" ]]; then
+    opts+=(-i "$SSH_KEY")
+  fi
   if [[ -n "$password" ]] && have sshpass; then
     SSH_ARGV=(sshpass -p "$password" ssh "${opts[@]}" -p "$port" "$user@$host")
   else

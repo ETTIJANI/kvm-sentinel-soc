@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tmux operations dashboard: `scripts/tmux-dashboard.sh` (create/attach/status/logs/stop),
   `scripts/dashboard-status.sh` (health snapshot, watch, JSON, per-section),
   `scripts/tmux-dashboard-stop.sh` (PID-safe teardown), `.env.example`, README section
+- Rootless NixOS deployment support in `deploy-lab.sh` for unprivileged `libvirtd` members
+- Docker-published approval-daemon workaround for NixOS hosts where the guest→host webhook is filtered
+- Recovery notes for interrupted vm-honeypot cloud-init and bandwidth-constrained Ollama installs
 
 ### Changed
 - `README.md` restructured for conciseness (452 → ~120 lines)
@@ -22,10 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Detection threshold wording: "more than 5" → "5 or more" (matches code)
 - Storage budget reduced: 50 GiB → 25 GiB (vm-honeypot 20→10 GiB, vm-soc 30→15 GiB)
 - RAM budget reduced: 6 GiB → 5 GiB (vm-soc 5→4 GiB)
+- `README.md`: rootless quickstart, validation summary, Ollama fallback, and webhook-firewall warning
+- `docs/01-INSTALL-NIXOS.md`: unprivileged deployment and §8.1 container workaround
+- `docs/04-CLASSROOM-LIVE-FIRE.md`: rootless classroom checklist note
+- `docs/TROUBLESHOOTING.md`: webhook-firewall, slow-Ollama, and interrupted-cloud-init recovery
+- `deploy-lab.sh`: unprivileged preflight, `qemu-libvirtd` ACLs, pipefail-safe network checks,
+  explicit cloud-init seed directories
+- `approval_daemon.py`: dry-run approval is audited as `dry_run:true` without claiming the
+  snapshot or NIC changed; dry-run counts as approved rather than failed
 
 ### Fixed
 - `backend-isolated.xml`: removed invalid `<forward mode='none'/>` (libvirt ≥10/12)
 - `deploy-lab.sh`: renderer now skips comment lines containing tokens
+- `deploy-lab.sh`: `build_seed` now receives the correct `cloud-init-vm1`/`cloud-init-vm2` directory
+- `deploy-lab.sh`: baseline snapshot check uses an exact name match under `pipefail`
 - `enable-live-fire.sh`: `flush_rules()` strips quotes from iptables output
 - `agent_analyste.py`: timeout reduced 180s → 25s with startup `warm_up()`
 - `approval_daemon.py`: removed 0.0.0.0 bind fallback (security fix)
@@ -34,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docker-compose.yml`: removed static IP from simulator (address conflict)
 - `cloud-init-vm1/user-data`: added SSH key permission fix (StrictModes)
 - `cloud-init-vm2/user-data`: added SSH key permission fix (StrictModes)
+
+### Validated
+- 2026-11-03, NixOS 26.05, unprivileged `libvirtd` user: 6 synthetic SSH failures → high/6 alert
+  → HTTP 202 webhook → human-approved `forensic-breach-*` snapshot and backend NIC `down`
+  → audit `snapshot_ok:true`, `quarantine_ok:true` → NIC restored `up`
+- Ollama unavailable during validation; the deterministic heuristic assessment path was exercised
 
 ## [0.1.0] - 2026-10-30
 

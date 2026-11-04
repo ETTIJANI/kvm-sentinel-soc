@@ -53,6 +53,12 @@ ssh soc@192.168.122.20 'wget -qO- http://192.168.122.1:5000/health || curl -s ht
 ssh soc@192.168.122.20 'docker exec ollama ollama run qwen2.5:0.5b "ok" </dev/null >/dev/null 2>&1 || true'
 ```
 
+On a rootless NixOS host, run the controller as your `libvirtd` user (`.venv/bin/python
+host/controller/approval_daemon.py` without `sudo`). If vm-soc cannot reach
+`192.168.122.1:5000`, use the Docker-published controller in
+[01-INSTALL-NIXOS.md §8.1](01-INSTALL-NIXOS.md#81-rootless-nixos-deployment-and-the-webhook-firewall).
+The `restore-honeypot.sh` and live-fire commands still require root.
+
 Then publish the trap:
 
 ```bash

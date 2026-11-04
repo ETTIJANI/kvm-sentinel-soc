@@ -28,14 +28,31 @@ cd kvm-sentinel-soc
 
 # 2. Provision (NixOS)
 sudo nixos-rebuild switch --flake ./host/nixos#default
-sudo ./host/provisioning/deploy-lab.sh
+# Rootless if your user is in libvirtd/kvm; add sudo only if virsh requires it.
+./host/provisioning/deploy-lab.sh
 
 # 3. Start controller
-sudo python3 host/controller/approval_daemon.py
+python3 host/controller/approval_daemon.py
+# If vm-soc cannot reach host:5000, use the Docker-published controller
+# in docs/01-INSTALL-NIXOS.md §8.1.
 
-# 4. Trigger a demo attack
+# 4. Start the demo stack
 ssh soc@192.168.122.20 'sudo docker compose -f /opt/soc/docker-compose.yml up -d'
 ```
+
+## Graceful shutdown
+
+Stop the lab without deleting any state:
+
+```bash
+./host/provisioning/shutdown-lab.sh --dry-run   # preview
+./host/provisioning/shutdown-lab.sh             # stop stacks, controller, dashboard, then VMs
+```
+
+This preserves domains, QCOW2 overlays, seed ISOs, snapshots, libvirt networks,
+guest Docker volumes, reports, and controller audit state. Use
+`host/provisioning/cleanup-lab.sh` only when you intentionally want a destructive
+teardown.
 
 ## Operations dashboard (tmux)
 
@@ -79,6 +96,7 @@ manual command (`docker compose run --rm simulator`).
 Troubleshooting:
 
 - `ssh unreachable` panes → start the lab (`sudo ./host/provisioning/deploy-lab.sh`) or set `DASH_VM*_PASSWORD` / install `sshpass`.
+- VM2 panes show `Permission denied (publickey,password)` → set `DASH_SSH_KEY=/home/you/.ssh/id_ed25519`; the dashboard now skips the Loki readiness wait instead of stalling for 180s when the VM2 stack did not start.
 - controller pane dies with a bind error → `192.168.122.1` is down: `sudo virsh net-start default`.
 - panes report `compose ps failed` → stack not up; read `logs/tmux-dashboard/bootstrap.log`.
 - `live-fire` shows SKIP → needs root: `sudo ./host/provisioning/enable-live-fire.sh status`.
@@ -103,6 +121,21 @@ Troubleshooting:
 - ~~**Simulator networking**: Static IP conflict~~ (FIXED)
 - **Promtail → Alloy**: Promtail is in maintenance mode. Grafana Alloy is the successor.
   Migration recommended when Alloy's resource footprint drops below 30 MB.
+- **NixOS webhook firewall**: a host-bound controller on `5000` may be unreachable from vm-soc
+  even when the port is allowed. Use the Docker-published controller in
+  [NixOS Install §8.1](docs/01-INSTALL-NIXOS.md#81-rootless-nixos-deployment-and-the-webhook-firewall).
+- **Ollama is optional**: agents fall back to deterministic heuristic assessment when
+  `11434` is unavailable. `deploy-lab.sh` still waits for Ollama, so pre-pull the model or
+  budget the wait on bandwidth-constrained links.
+- **Rootless deployment**: `deploy-lab.sh` supports unprivileged `libvirtd` members and grants
+  `qemu-libvirtd` ACLs to the lab paths. See [NixOS Install §7](docs/01-INSTALL-NIXOS.md#7-deploy-the-lab).
+
+## Validation
+
+The unprivileged NixOS path was validated end-to-end on 2026-11-03 (NixOS 26.05): synthetic SSH
+brute force → high-severity alert → HTTP 202 webhook → human-approved `forensic-breach-*` snapshot
+and backend-NIC quarantine → audit `snapshot_ok`/`quarantine_ok` true → link restored. Ollama was
+unavailable, so the deterministic heuristic assessment path was exercised.
 
 ## Contributing
 
